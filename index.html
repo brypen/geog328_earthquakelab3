@@ -1,162 +1,234 @@
 <!DOCTYPE html>
-<html lang="en-US">
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Earthquake List</title>
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-    <link href="https://api.mapbox.com/mapbox-gl-js/v2.5.0/mapbox-gl.css" rel="stylesheet">
-    <script src="https://api.mapbox.com/mapbox-gl-js/v2.5.0/mapbox-gl.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoJSON Map</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    /* Full screen map */
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+    }
 
-        #container {
-            display: flex;
-            height: 100vh;
-            flex-direction: row;
-            align-items: stretch;
-        }
+    /* Side panel style */
+    #side-panel {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 300px;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.8);
+      padding: 20px;
+      box-shadow: -2px 0px 5px rgba(0, 0, 0, 0.5);
+      overflow-y: auto;
+      display: block;
+    }
 
-        #side-panel {
-            flex-basis: 500px;
-            overflow-y: scroll;
-        }
+    /* Media Query for smaller screens */
+    @media screen and (max-width: 1024px) {
+      #side-panel {
+        display: none;
+      }
+    }
 
-        #map {
-            flex-grow: 1;
-        }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
 
-        button {
-            margin-bottom: 10px;
-        }
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border: 1px solid #ddd;
+    }
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            border: 1px solid #ddd;
-        }
+    th {
+      cursor: pointer;
+    }
 
-        th, td {
-            text-align: left;
-            padding: 16px;
-        }
+    /* Add color coding for table rows */
+    .rocky-row {
+      background-color: red;
+      color: white;
+    }
 
-        tr:nth-child(even) {
-            background-color: #f2f2f2;
-        }
-    </style>
+    .wyoming-row {
+      background-color: blue;
+      color: white;
+    }
+  </style>
 </head>
 <body>
-    <main id="container">
-        <div id="side-panel">
-            <h2>Earthquake List</h2>
-            <button>Sort by Magnitude</button>
-            <table>
-                <tr>
-                    <th>id</th>
-                    <th>magnitude</th>
-                    <th>timestamp</th>
-                </tr>
-            </table>
-        </div>
-        <div id="map"></div>
-    </main>
+  <div id="map"></div>
+  <div id="side-panel">
+    <h3>The Intersection of Wyoming and the Rocky Mountain Range</h3>
+    <table id="geojson-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0)">Name</th>
+          <th onclick="sortTable(1)">Area (sq km)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Data will be dynamically added here -->
+      </tbody>
+    </table>
+  </div>
 
-    <script>
-        mapboxgl.accessToken = 'pk.eyJ1IjoiYnJ5cGVuIiwiYSI6ImNtNnNra2EyeDA5eGIycXE1NmE1dTVsM3UifQ.FfcmD2YM-jnac1-tl81THA';
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf"></script>
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiYnJ5cGVuIiwiYSI6ImNtNnNra2EyeDA5eGIycXE1NmE1dTVsM3UifQ.FfcmD2YM-jnac1-tl81THA';
 
-        // Initialize Mapbox Map
-        let map = new mapboxgl.Map({
-            container: 'map',
-            style: 'mapbox://styles/mapbox/satellite-v9',
-            zoom: 5.5,
-            center: [138, 38]
-        });
+    // Initialize map
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/outdoors-v11',
+      center: [-106.45, 40.3], // Adjust to center the map over your region
+      zoom: 5
+    });
 
-        async function geojsonFetch() {
-            let response, earthquakes, japan, table;
-            // Fetch earthquake GeoJSON data
-            response = await fetch('assets/earthquakes.geojson');
-            earthquakes = await response.json();
-            // Fetch Japan boundaries GeoJSON data
-            response = await fetch('assets/japan.json');
-            japan = await response.json();
+    // Initialize variables to store feature IDs for highlighting
+    let rockyFeatureId = null;
+    let wyomingFeatureId = null;
 
-            // Add earthquake data to map
-            map.on('load', function() {
-                map.addSource('earthquakes', {
-                    type: 'geojson',
-                    data: earthquakes
-                });
+    // Load GeoJSON data
+    Promise.all([
+      fetch('assets/rocky-mountain-range-area_838.geojson').then(response => response.json()),
+      fetch('assets/wyoming.geojson').then(response => response.json())
+    ]).then(([rockyData, wyomingData]) => {
+      // Add data to the map
+      map.addSource('rocky', {
+        type: 'geojson',
+        data: rockyData
+      });
+      map.addLayer({
+        id: 'rocky-layer',
+        type: 'fill',
+        source: 'rocky',
+        paint: {
+          'fill-color': '#f00',
+          'fill-opacity': 0.5
+        }
+      });
 
-                map.addLayer({
-                    'id': 'earthquakes-layer',
-                    'type': 'circle',
-                    'source': 'earthquakes',
-                    'paint': {
-                        'circle-radius': 8,
-                        'circle-stroke-width': 2,
-                        'circle-color': 'red',
-                        'circle-stroke-color': 'white'
-                    }
-                });
+      map.addSource('wyoming', {
+        type: 'geojson',
+        data: wyomingData
+      });
+      map.addLayer({
+        id: 'wyoming-layer',
+        type: 'fill',
+        source: 'wyoming',
+        paint: {
+          'fill-color': '#00f',
+          'fill-opacity': 0.5
+        }
+      });
 
-                // Add Japan boundaries to map
-                map.addSource('japan', {
-                    type: 'geojson',
-                    data: japan
-                });
+      // Add table data dynamically from GeoJSON properties
+      const tableBody = document.getElementById('geojson-table').getElementsByTagName('tbody')[0];
 
-                map.addLayer({
-                    'id': 'japan-layer',
-                    'type': 'fill',
-                    'source': 'japan',
-                    'paint': {
-                        'fill-color': '#0080ff',
-                        'fill-opacity': 0.5
-                    }
-                });
-            });
+      // Function to add data to the table
+      const addToTable = (name, area, type) => {
+        const row = tableBody.insertRow();
+        row.insertCell(0).textContent = name;
+        row.insertCell(1).textContent = area.toFixed(2); // Display area rounded to 2 decimal places
 
-            // Generate earthquake table
-            table = document.getElementsByTagName("table")[0];
-            let row, cell1, cell2, cell3;
-            for (let i = 0; i < earthquakes.features.length; i++) {
-                row = table.insertRow(-1);
-                cell1 = row.insertCell(0);
-                cell2 = row.insertCell(1);
-                cell3 = row.insertCell(2);
-                cell1.innerHTML = earthquakes.features[i].properties.id;
-                cell2.innerHTML = earthquakes.features[i].properties.mag;
-                cell3.innerHTML = new Date(earthquakes.features[i].properties.time).toLocaleDateString("en-US");
-            }
-
-            // Sort the table by magnitude when the button is clicked
-            let btn = document.getElementsByTagName("button")[0];
-            btn.addEventListener('click', sortTable);
-
-            function sortTable() {
-                let table = document.getElementsByTagName("table")[0];
-                let rows = table.rows;
-                let switching = true;
-                while (switching) {
-                    switching = false;
-                    for (let i = 1; i < rows.length - 1; i++) {
-                        let x = parseFloat(rows[i].getElementsByTagName("td")[1].innerHTML);
-                        let y = parseFloat(rows[i + 1].getElementsByTagName("td")[1].innerHTML);
-                        if (x < y) {
-                            rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
-                            switching = true;
-                            break;
-                        }
-                    }
-                }
-            }
+        // Add class for color coding
+        if (type === 'rocky') {
+          row.classList.add('rocky-row');
+        } else if (type === 'wyoming') {
+          row.classList.add('wyoming-row');
         }
 
-        geojsonFetch();
-    </script>
+        // Attach click event to highlight the feature
+        row.addEventListener('click', () => highlightFeature(type));
+      };
+
+      // Function to calculate area for each GeoJSON feature
+      const calculateArea = (geometry) => {
+        if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
+          const area = turf.area(geometry); // Calculate area using Turf.js
+          return area / 1000000; // Convert area from square meters to square kilometers
+        }
+        return 0;
+      };
+
+      // Function to highlight the feature on the map
+      const highlightFeature = (type) => {
+        if (type === 'rocky' && rockyFeatureId) {
+          map.setFeatureState(
+            { source: 'rocky', id: rockyFeatureId },
+            { hover: true }
+          );
+          map.flyTo({ center: [-106.45, 40.3], zoom: 6 });
+        } else if (type === 'wyoming' && wyomingFeatureId) {
+          map.setFeatureState(
+            { source: 'wyoming', id: wyomingFeatureId },
+            { hover: true }
+          );
+          map.flyTo({ center: [-107.5, 43], zoom: 6 });
+        }
+      };
+
+      // Loop through the GeoJSON data to populate the table and store feature IDs
+      const rockyFeatures = rockyData.features;
+      const wyomingFeatures = wyomingData.features;
+
+      rockyFeatures.forEach(feature => {
+        const area = calculateArea(feature.geometry);
+        addToTable(feature.properties.name || 'Rocky Mountains', area, 'rocky');
+        rockyFeatureId = feature.id; // Store the feature ID
+      });
+
+      wyomingFeatures.forEach(feature => {
+        const area = calculateArea(feature.geometry);
+        addToTable(feature.properties.name || 'Wyoming', area, 'wyoming');
+        wyomingFeatureId = feature.id; // Store the feature ID
+      });
+    });
+
+    // Sort table function
+    function sortTable(n) {
+      const table = document.getElementById("geojson-table");
+      const rows = table.rows;
+      let switching = true;
+      let dir = "asc";
+
+      while (switching) {
+        switching = false;
+        let shouldSwitch = false;
+        for (let i = 1; i < (rows.length - 1); i++) {
+          let x = rows[i].getElementsByTagName("TD")[n];
+          let y = rows[i + 1].getElementsByTagName("TD")[n];
+
+          if (dir === "asc" && x.textContent.toLowerCase() > y.textContent.toLowerCase()) {
+            shouldSwitch = true;
+            break;
+          } else if (dir === "desc" && x.textContent.toLowerCase() < y.textContent.toLowerCase()) {
+            shouldSwitch = true;
+            break;
+          }
+        }
+
+        if (shouldSwitch) {
+          rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+          switching = true;
+        } else {
+          if (dir === "asc") {
+            dir = "desc";
+          } else {
+            break;
+          }
+        }
+      }
+    }
+  </script>
 </body>
 </html>
